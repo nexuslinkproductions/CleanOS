@@ -1,11 +1,30 @@
-# CleanOS voice
+# CleanOS product voice
 
-Write what the product does. Lead with capability, measurement, and reversible action.
+## Affirmative framing
 
-Forbidden patterns:
-- Ending a sentence, slogan, or tagline with a negation ("never folklore", "no fluff", "without X")
-- Em dashes as connective filler
-- Fake-authority product prose
+Lead with what CleanOS **does**:
 
-Preferred tagline shape:
-"CleanOS measures macOS bottlenecks, ranks reversible fixes by evidence, and applies only what you approve."
+- Measure first.
+- Propose reversible experiments second.
+- Report before/after evidence with fact vs inference boundaries.
+
+## Forbidden patterns
+
+- Ending a sentence, slogan, tagline, or heading with a negation ("never folklore", "no fluff", "without X", "not a cleaner").
+- Using negation as the punchline. If a boundary must be stated, put it mid-sentence or in a dedicated Non-goals / Safety section.
+- Selling by insulting the category alone. State the positive product promise first.
+
+## Allowed boundary language
+
+Boundaries belong in `docs/INTAKE.md`, `docs/SAFETY.md`, or a Non-goals section:
+
+- Prefer: "CleanOS collects evidence, proposes reversible experiments, and reports matched before/after results."
+- Prefer: "Out of scope: cache nukes, identity-blind process killing, unsupported silicon unlock claims."
+- Avoid: "CleanOS is not a cleaner." as the hero line.
+
+## README hero pattern
+
+```text
+Good: CleanOS measures macOS performance, proposes reversible fixes, and proves the result.
+Bad:  Measure first, mutate second, never folklore.
+```
