@@ -60,10 +60,7 @@ htmlcov/
 .nox/
 *.egg
 
-# SSSF / ADW runtime (when stamped later)
 adws/adw_data/sessions/
-adws/adw_data/sssf.db
-adws/adw_data/sssf.db-*
 .uv-cache/
 
 # Env / secrets
