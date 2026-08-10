@@ -1,0 +1,66 @@
+# CleanOS phase stub (optional scaffolding)
+# Not a runnable agent roster. Full ADW stamp deferred until PLAN accepts it.
+# Public product docs stay free of factory branding; this file is operator scaffolding only.
+
+project:
+  name: CleanOS
+  repo: nexuslinkproductions/CleanOS
+  current: SCOUT
+  next: PLAN
+
+phases:
+  - name: INTAKE
+    status: complete
+    artifacts:
+      - docs/INTAKE.md
+      - README.md
+  - name: SCOUT
+    status: in_progress
+    artifacts:
+      - docs/SCOUT.md
+      - docs/ARCHITECTURE.md
+      - docs/SAFETY.md
+      - SPEC.md
+  - name: PLAN
+    status: pending
+    writes:
+      - specs/
+      - docs/
+  - name: BUILD
+    status: pending
+  - name: VALIDATE
+    status: pending
+  - name: REVIEW
+    status: pending
+  - name: SHIP
+    status: pending
+
+defaults:
+  coding_agent: hermes
+  data_dir: adws/adw_data
+  protected_files:
+    - adws/adw_modules/
+    - adws/adw_sssf_config/
+    - adws/adw_*.py
+    - sssf.config.yaml
+    - docs/SAFETY.md
+    - LICENSE
+
+agents:
+  - name: scout
+    purpose: Find and report evidence and risks; change nothing.
+    writes: []
+  - name: planner
+    purpose: Turn intake and scout into an implementable plan.
+    writes:
+      - specs/
+  - name: builder
+    purpose: Implement the plan exactly; report every changed file.
+  - name: reviewer
+    purpose: Confirm built work matches SPEC; change nothing.
+    writes: []
+
+notes:
+  - Operator scaffolding only; does not execute workflows.
+  - Stamp a full factory instance only after PLAN acceptance.
+  - Product CLI and MCP wiring remain out of scope until BUILD.
