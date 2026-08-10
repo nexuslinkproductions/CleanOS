@@ -42,7 +42,13 @@ and process histories.
 
 ## Evidence note (from 2026-08-10 host)
 
-- Adobe CC agents present; Adobe log activity stopped Nov 2025 (9 months idle)
-  while 457 MB of stale crash logs accumulated. Class: `dead`.
+- Adobe CC agents: initially suspected `dead` because ACPLocalLogs held 403 MB
+  of stale Photoshop crash logs (last write Nov 2025). Live evidence
+  corrected the class: ACCFinderSync running (2 instances) and 22 Adobe log
+  files touched since Nov 2025. Class: `active`. Lesson: log mtime alone is
+  insufficient evidence; combine process state, log activity, and product
+  usage.
 - Perplexity/Comet updaters: product in daily use. Class: `active`.
 - Google keystone / Dropbox updaters: tied to products in use; cost low.
+- Loaded third-party launch agents on this host are all in use; no safe
+  disable candidates found in this pass.
