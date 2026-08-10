@@ -1,0 +1,243 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "CleanOS Run Snapshot",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "collected_at",
+    "duration_ms",
+    "system",
+    "memory",
+    "processes",
+    "launchd",
+    "power",
+    "thermal",
+    "display",
+    "probe_errors"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string"
+    },
+    "collected_at": {
+      "type": "string"
+    },
+    "duration_ms": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "system": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "required": [
+        "os_version",
+        "chip",
+        "cpu_count",
+        "boot_time_epoch",
+        "loadavg_1",
+        "loadavg_5",
+        "loadavg_15"
+      ],
+      "properties": {
+        "os_version": {
+          "type": "string"
+        },
+        "chip": {
+          "type": "string"
+        },
+        "cpu_count": {
+          "type": "integer"
+        },
+        "boot_time_epoch": {
+          "type": "integer"
+        },
+        "loadavg_1": {
+          "type": "number"
+        },
+        "loadavg_5": {
+          "type": "number"
+        },
+        "loadavg_15": {
+          "type": "number"
+        }
+      }
+    },
+    "memory": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "required": [
+        "total_bytes",
+        "used_bytes",
+        "free_bytes",
+        "swap_used_bytes",
+        "swap_total_bytes",
+        "compressor_bytes",
+        "pressure_level",
+        "page_size_bytes"
+      ],
+      "properties": {
+        "total_bytes": {
+          "type": "integer"
+        },
+        "used_bytes": {
+          "type": "integer"
+        },
+        "free_bytes": {
+          "type": "integer"
+        },
+        "swap_used_bytes": {
+          "type": "integer"
+        },
+        "swap_total_bytes": {
+          "type": "integer"
+        },
+        "compressor_bytes": {
+          "type": "integer"
+        },
+        "pressure_level": {
+          "type": "integer"
+        },
+        "page_size_bytes": {
+          "type": "integer"
+        }
+      }
+    },
+    "processes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "pid",
+          "ppid",
+          "cpu_pct",
+          "rss_bytes",
+          "elapsed_secs",
+          "executable",
+          "command"
+        ],
+        "properties": {
+          "pid": {
+            "type": "integer"
+          },
+          "ppid": {
+            "type": "integer"
+          },
+          "cpu_pct": {
+            "type": "number"
+          },
+          "rss_bytes": {
+            "type": "integer"
+          },
+          "elapsed_secs": {
+            "type": "integer"
+          },
+          "executable": {
+            "type": "string"
+          },
+          "command": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "launchd": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "required": [
+        "managed"
+      ],
+      "properties": {
+        "managed": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "power": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "required": [
+        "source",
+        "percentage"
+      ],
+      "properties": {
+        "source": {
+          "type": "string"
+        },
+        "percentage": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      }
+    },
+    "thermal": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "required": [
+        "thermal_pressure_level",
+        "raw_summary"
+      ],
+      "properties": {
+        "thermal_pressure_level": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "raw_summary": {
+          "type": "string"
+        }
+      }
+    },
+    "display": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "required": [
+        "display_count",
+        "primary_summary"
+      ],
+      "properties": {
+        "display_count": {
+          "type": "integer"
+        },
+        "primary_summary": {
+          "type": "string"
+        }
+      }
+    },
+    "probe_errors": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "probe",
+          "message"
+        ],
+        "properties": {
+          "probe": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,160 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "CleanOS Report",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "generated_at",
+    "source_run",
+    "collected_at",
+    "probe_count",
+    "error_count",
+    "findings_by_class",
+    "findings",
+    "launch_inventory",
+    "zero_finding_notes",
+    "summary_line"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string"
+    },
+    "generated_at": {
+      "type": "string"
+    },
+    "source_run": {
+      "type": "string"
+    },
+    "collected_at": {
+      "type": "string"
+    },
+    "probe_count": {
+      "type": "integer"
+    },
+    "error_count": {
+      "type": "integer"
+    },
+    "findings_by_class": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "integer"
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "category",
+          "subcategory",
+          "summary",
+          "evidence",
+          "expected_gain",
+          "risk",
+          "reversible",
+          "requires_user_action",
+          "mode",
+          "auto_ok",
+          "fact_or_inference",
+          "finding",
+          "score",
+          "pid",
+          "cpu_pct",
+          "rss_bytes",
+          "label"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string"
+          },
+          "subcategory": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "evidence": {
+            "type": "object"
+          },
+          "expected_gain": {
+            "type": "string"
+          },
+          "risk": {
+            "type": "string"
+          },
+          "reversible": {
+            "type": "string"
+          },
+          "requires_user_action": {
+            "type": "boolean"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "auto_ok": {
+            "type": "boolean"
+          },
+          "fact_or_inference": {
+            "type": "string"
+          },
+          "finding": {
+            "type": "string"
+          },
+          "score": {
+            "type": "integer"
+          },
+          "pid": {
+            "type": "integer"
+          },
+          "cpu_pct": {
+            "type": "number"
+          },
+          "rss_bytes": {
+            "type": "integer"
+          },
+          "label": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "launch_inventory": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "path",
+          "count",
+          "top_labels"
+        ],
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "count": {
+            "type": "integer"
+          },
+          "top_labels": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "zero_finding_notes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "summary_line": {
+      "type": "string"
+    }
+  }
+}

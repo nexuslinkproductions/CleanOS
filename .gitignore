@@ -96,3 +96,7 @@ performance-audit/
 
 # OS package managers
 .homebrew/
+
+# Rust
+/target/
+Cargo.lock
