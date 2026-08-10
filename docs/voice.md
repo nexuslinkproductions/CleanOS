@@ -1,30 +1,29 @@
-# CleanOS product voice
+# CleanOS voice
 
-## Affirmative framing
+## Required
 
-Lead with what CleanOS **does**:
+- Affirmative product language: say what CleanOS does.
+- Short declarative sentences.
+- Lead with measurement, reversible change, and user approval.
+- Prefer periods over stacked clauses.
 
-- Measure first.
-- Propose reversible experiments second.
-- Report before/after evidence with fact vs inference boundaries.
+## Forbidden
 
-## Forbidden patterns
-
+- Em dashes (the long dash character). Use a period, comma, colon, or parentheses.
 - Ending a sentence, slogan, tagline, or heading with a negation ("never folklore", "no fluff", "without X", "not a cleaner").
-- Using negation as the punchline. If a boundary must be stated, put it mid-sentence or in a dedicated Non-goals / Safety section.
-- Selling by insulting the category alone. State the positive product promise first.
+- Slogan stacking that ends on prohibition.
+- Naming internal orchestration systems, factory frameworks, or process brands in public product docs.
+- Putting process methodology into the public README as product branding.
 
-## Allowed boundary language
+## Preferred pitch shape
 
-Boundaries belong in `docs/INTAKE.md`, `docs/SAFETY.md`, or a Non-goals section:
+Good: CleanOS measures bottlenecks, ranks reversible fixes by evidence, and applies only what you approve.
 
-- Prefer: "CleanOS collects evidence, proposes reversible experiments, and reports matched before/after results."
-- Prefer: "Out of scope: cache nukes, identity-blind process killing, unsupported silicon unlock claims."
-- Avoid: "CleanOS is not a cleaner." as the hero line.
+Bad: Measure first, mutate second, never folklore.
+Bad: CleanOS is not a cleaner.
+Bad: Built with [internal factory name].
 
-## README hero pattern
+## Status labels
 
-```text
-Good: CleanOS measures macOS performance, proposes reversible fixes, and proves the result.
-Bad:  Measure first, mutate second, never folklore.
-```
+Use product-facing status only: early docs, MVP SPEC, alpha, beta.
+Do not brand public docs with internal workflow phase labels.
