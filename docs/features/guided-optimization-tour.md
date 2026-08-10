@@ -13,11 +13,16 @@ resulting plan to an agent to execute and verify.
 
 ## Flow
 
+0. **Taxonomy** (category-taxonomy.md): every candidate lands in one leaf
+   category under CLEANUP (processes, logs, caches, temp-state, crash-data,
+   old-artifacts, launch-items, registry-state) or OPTIMIZATION (cpu, memory,
+   startup, disk-io, network, display-gpu, power-thermal, storage,
+   harness-fleet). The tour groups by top-level mode, then category, then
+   subcategory.
 1. **Scan** (automatic, read-only): collect every candidate from all
-   optimizers (login items, stale processes, log growth, wakeups, swap,
-   launch agents, display hints). Each candidate carries:
-   - id, category, one-line summary, expected gain, risk, reversibility,
-     evidence (measured values), requires-user-action flag.
+   optimizers. Each candidate carries:
+   - id, category, subcategory, one-line summary, expected gain, risk,
+     reversibility, evidence (measured values), requires-user-action flag.
 2. **Tour**: one interactive screen. Grouped by category. Each row:
    `[x]  [gain]  [risk]  summary  (evidence)`.
    Defaults: safe reversible items pre-selected; anything touching data,
