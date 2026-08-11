@@ -1,5 +1,6 @@
-/*! CleanOS scan core library: collect, classify, rank, report. */
+/*! CleanOS scan core library: collect, classify, rank, report, benchmark. */
 
+pub mod bench;
 pub mod classifier;
 pub mod error;
 pub mod inventory;

@@ -1,0 +1,255 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "CleanOS Benchmark Result",
+  "type": "object",
+  "required": [
+    "collected_at",
+    "duration_ms",
+    "machine",
+    "probes",
+    "skipped"
+  ],
+  "properties": {
+    "collected_at": {
+      "type": "string"
+    },
+    "duration_ms": {
+      "type": "integer"
+    },
+    "machine": {
+      "type": "object",
+      "required": [
+        "chip",
+        "cpu_count",
+        "os_version"
+      ],
+      "properties": {
+        "chip": {
+          "type": "string"
+        },
+        "cpu_count": {
+          "type": "integer"
+        },
+        "os_version": {
+          "type": "string"
+        }
+      }
+    },
+    "probes": {
+      "type": "object",
+      "required": [
+        "power"
+      ],
+      "properties": {
+        "cpu_burst": {
+          "type": "object",
+          "required": [
+            "runs",
+            "median"
+          ],
+          "properties": {
+            "runs": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "real",
+                  "user",
+                  "sys"
+                ],
+                "properties": {
+                  "real": {
+                    "type": "number"
+                  },
+                  "user": {
+                    "type": "number"
+                  },
+                  "sys": {
+                    "type": "number"
+                  }
+                }
+              }
+            },
+            "median": {
+              "type": "object",
+              "required": [
+                "real",
+                "user",
+                "sys"
+              ],
+              "properties": {
+                "real": {
+                  "type": "number"
+                },
+                "user": {
+                  "type": "number"
+                },
+                "sys": {
+                  "type": "number"
+                }
+              }
+            }
+          }
+        },
+        "cpu_sustained": {
+          "type": "object",
+          "required": [
+            "real",
+            "user",
+            "sys"
+          ],
+          "properties": {
+            "real": {
+              "type": "number"
+            },
+            "user": {
+              "type": "number"
+            },
+            "sys": {
+              "type": "number"
+            }
+          }
+        },
+        "crypto": {
+          "type": "object",
+          "required": [
+            "aes_128_gcm_4kb",
+            "aes_128_gcm_peak",
+            "sha256_4kb",
+            "sha256_peak",
+            "fallback"
+          ],
+          "properties": {
+            "aes_128_gcm_4kb": {
+              "type": "number"
+            },
+            "aes_128_gcm_peak": {
+              "type": "number"
+            },
+            "sha256_4kb": {
+              "type": "number"
+            },
+            "sha256_peak": {
+              "type": "number"
+            },
+            "fallback": {
+              "type": "boolean"
+            }
+          }
+        },
+        "memory": {
+          "type": "object",
+          "required": [
+            "pages_free_delta",
+            "swap_used_bytes_before",
+            "swap_used_bytes_after",
+            "compressor_bytes_before",
+            "compressor_bytes_after"
+          ],
+          "properties": {
+            "pages_free_delta": {
+              "type": "integer"
+            },
+            "swap_used_bytes_before": {
+              "type": "integer"
+            },
+            "swap_used_bytes_after": {
+              "type": "integer"
+            },
+            "compressor_bytes_before": {
+              "type": "integer"
+            },
+            "compressor_bytes_after": {
+              "type": "integer"
+            }
+          }
+        },
+        "power": {
+          "type": "object",
+          "required": [
+            "captured",
+            "reason",
+            "peak_p0_mhz",
+            "peak_p1_mhz",
+            "max_core_mhz",
+            "e_cluster_mhz",
+            "cpu_mw",
+            "gpu_mw",
+            "combined_mw"
+          ],
+          "properties": {
+            "captured": {
+              "type": "boolean"
+            },
+            "reason": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "peak_p0_mhz": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "peak_p1_mhz": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "max_core_mhz": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "e_cluster_mhz": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "cpu_mw": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "gpu_mw": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "combined_mw": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "skipped": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "probe",
+          "reason"
+        ],
+        "properties": {
+          "probe": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}
