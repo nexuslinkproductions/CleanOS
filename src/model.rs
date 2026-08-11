@@ -15,7 +15,26 @@ pub struct RunSnapshot {
     pub power: Option<PowerInfo>,
     pub thermal: Option<ThermalInfo>,
     pub display: Option<DisplayInfo>,
+    /// pid -> LISTEN socket entries from `lsof -nP -iTCP -sTCP:LISTEN`.
+    #[serde(default)]
+    pub sockets: BTreeMap<String, Vec<SocketEntry>>,
     pub probe_errors: Vec<ProbeError>,
+}
+
+/// One LISTEN socket entry: host and port as reported by lsof.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SocketEntry {
+    pub port: u16,
+    pub host: String,
+}
+
+/// Harness process state: orphaned when reparented to launchd with no job
+/// behind it, attached otherwise (SPEC section 2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum HarnessState {
+    Orphaned,
+    Attached,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -56,6 +75,10 @@ pub struct ProcessInfo {
     pub elapsed_secs: u64,
     pub executable: String,
     pub command: String,
+    /// Harness markers matched on command/args (SPEC section 2); absent when
+    /// no marker matched.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub harness_markers: Option<Vec<String>>,
 }
 
 /// Launchd managed set: pid string -> label (schema object map).

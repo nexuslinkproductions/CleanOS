@@ -1,13 +1,15 @@
 //! Read-only probes. Each probe is isolated: failures become `probe_errors`.
 
+use std::collections::BTreeMap;
 use std::process::Command;
 use std::time::Instant;
 
 use chrono::Local;
 
+use crate::classifier;
 use crate::model::{
     DisplayInfo, LaunchdInfo, MemoryInfo, PowerInfo, ProbeError, ProcessInfo, RunSnapshot,
-    SystemInfo, ThermalInfo,
+    SocketEntry, SystemInfo, ThermalInfo,
 };
 use crate::parsers;
 
@@ -151,7 +153,16 @@ fn probe_memory(errors: &mut Vec<ProbeError>) -> Option<MemoryInfo> {
 fn probe_processes(errors: &mut Vec<ProbeError>) -> Vec<ProcessInfo> {
     match run_cmd("ps", &["-axo", "pid=,ppid=,pcpu=,rss=,etime=,comm=,args="]) {
         Ok(s) => match parsers::parse_ps(&s) {
-            Ok(v) => v,
+            Ok(mut v) => {
+                // Annotate harness markers on command/args (SPEC section 2).
+                for p in &mut v {
+                    let markers = classifier::harness_markers(p);
+                    if !markers.is_empty() {
+                        p.harness_markers = Some(markers);
+                    }
+                }
+                v
+            }
             Err(e) => {
                 record_err(errors, "processes", e);
                 Vec::new()
@@ -160,6 +171,23 @@ fn probe_processes(errors: &mut Vec<ProbeError>) -> Vec<ProcessInfo> {
         Err(e) => {
             record_err(errors, "processes", e);
             Vec::new()
+        }
+    }
+}
+
+/// `lsof -nP -iTCP -sTCP:LISTEN` into a pid -> [port, host] map. When lsof is
+/// unavailable the probe is skipped with a note and the map stays empty;
+/// `stale_dev_server` then degrades to elapsed-only (SPEC section 3).
+fn probe_sockets(errors: &mut Vec<ProbeError>) -> BTreeMap<String, Vec<SocketEntry>> {
+    match run_cmd("lsof", &["-nP", "-iTCP", "-sTCP:LISTEN"]) {
+        Ok(s) => parsers::parse_lsof_listen(&s),
+        Err(e) => {
+            record_err(
+                errors,
+                "sockets",
+                format!("lsof unavailable; socket probe skipped, stale_dev_server degrades to elapsed-only: {e}"),
+            );
+            BTreeMap::new()
         }
     }
 }
@@ -249,6 +277,7 @@ pub fn collect_run() -> RunSnapshot {
     let power = probe_power(&mut probe_errors);
     let thermal = probe_thermal(&mut probe_errors);
     let display = probe_display(&mut probe_errors);
+    let sockets = probe_sockets(&mut probe_errors);
 
     RunSnapshot {
         schema_version: "1".into(),
@@ -261,6 +290,7 @@ pub fn collect_run() -> RunSnapshot {
         power,
         thermal,
         display,
+        sockets,
         probe_errors,
     }
 }

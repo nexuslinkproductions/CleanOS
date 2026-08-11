@@ -140,6 +140,33 @@
           },
           "command": {
             "type": "string"
+          },
+          "harness_markers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "sockets": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": [
+            "port",
+            "host"
+          ],
+          "properties": {
+            "port": {
+              "type": "integer"
+            },
+            "host": {
+              "type": "string"
+            }
           }
         }
       }

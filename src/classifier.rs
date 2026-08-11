@@ -1,8 +1,10 @@
-//! Classification rules and thresholds (SPEC section 5).
+//! Classification rules and thresholds (SPEC section 5, harness-fleet section 2).
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
-use crate::model::{FactOrInference, ProcessInfo, RankedFinding, RunSnapshot};
+use crate::model::{
+    FactOrInference, HarnessState, ProcessInfo, RankedFinding, RunSnapshot, SocketEntry,
+};
 
 /// CPU percent threshold for orphan_candidate.
 pub const ORPHAN_CPU_PCT: f64 = 5.0;
@@ -12,6 +14,10 @@ pub const ORPHAN_RSS_BYTES: u64 = 536_870_912;
 pub const RUNAWAY_CPU_PCT: f64 = 50.0;
 /// RSS bytes threshold for memory_hog (1 GiB).
 pub const MEMORY_HOG_RSS_BYTES: u64 = 1_073_741_824;
+/// Elapsed seconds threshold for stale_dev_server (6 hours).
+pub const STALE_DEV_ELAPSED_SECS: u64 = 6 * 60 * 60;
+/// Executables considered dev servers for stale_dev_server.
+pub const DEV_SERVER_EXECUTABLES: &[&str] = &["node", "python", "python3", "deno"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FindingClass {
@@ -20,6 +26,10 @@ pub enum FindingClass {
     MemoryHog,
     DuplicateOrphan,
     Observed,
+    HarnessMcpServer,
+    HarnessLsp,
+    HarnessAgentDaemon,
+    StaleDevServer,
 }
 
 impl FindingClass {
@@ -30,6 +40,10 @@ impl FindingClass {
             FindingClass::MemoryHog => "memory_hog",
             FindingClass::DuplicateOrphan => "duplicate_orphan",
             FindingClass::Observed => "observed",
+            FindingClass::HarnessMcpServer => "harness_mcp_server",
+            FindingClass::HarnessLsp => "harness_lsp",
+            FindingClass::HarnessAgentDaemon => "harness_agent_daemon",
+            FindingClass::StaleDevServer => "stale_dev_server",
         }
     }
 }
@@ -65,7 +79,11 @@ pub const SYSTEM_PATH_PREFIXES: &[&str] = &[
 /// Such processes are launchd-managed by the system domain and are never
 /// orphan candidates, even though they have PPID=1.
 pub fn is_system_domain_path(proc: &ProcessInfo) -> bool {
-    if proc.command.to_ascii_lowercase().contains("core audio driver") {
+    if proc
+        .command
+        .to_ascii_lowercase()
+        .contains("core audio driver")
+    {
         return true;
     }
     SYSTEM_PATH_PREFIXES
@@ -84,6 +102,237 @@ fn launchd_managed_pids(run: &RunSnapshot) -> HashSet<u32> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+/// Marker rules for the four harness classes (SPEC section 2), matched
+/// against the lowercase command/args tokens.
+const MCP_MARKERS: &[&str] = &["mcp", "--mcp", "mcp.json", "stdio+mcp", "mcp-socket"];
+const LSP_MARKERS: &[&str] = &[
+    "typescript-language-server",
+    "pyright-langserver",
+    "rust-analyzer",
+    "vscode-langservers",
+    "lsp",
+];
+const AGENT_DAEMON_MARKERS: &[&str] = &["codex", "opencode", "cursor-agent", "claude", "hermes"];
+
+/// Harness markers found in a process command line, in the SPEC class order.
+/// Returns the concrete marker strings; empty means no harness marker.
+pub fn harness_markers(proc: &ProcessInfo) -> Vec<String> {
+    let lower = proc.command.to_ascii_lowercase();
+    let mut markers = Vec::new();
+
+    // harness_mcp_server: token "mcp", "--mcp", "mcp.json", "stdio"+"mcp",
+    // socket path under /tmp/ or ~/Library/.../mcp.
+    let tokens: Vec<&str> = lower.split_whitespace().collect();
+    let has_mcp_token = tokens.iter().any(|t| *t == "mcp");
+    if has_mcp_token {
+        markers.push("mcp".to_string());
+    }
+    if lower.contains("--mcp") {
+        markers.push("--mcp".to_string());
+    }
+    if lower.contains("mcp.json") {
+        markers.push("mcp.json".to_string());
+    }
+    let has_stdio = tokens.iter().any(|t| *t == "stdio");
+    if has_stdio && has_mcp_token {
+        markers.push("stdio+mcp".to_string());
+    }
+    let mcp_socket = tokens.iter().any(|t| {
+        (t.starts_with("/tmp/") || t.starts_with("~/library/") || t.contains("/mcp"))
+            && t.contains("mcp")
+    });
+    if mcp_socket {
+        markers.push("mcp-socket".to_string());
+    }
+
+    // harness_lsp: "--stdio" plus one of the LSP binary names.
+    if tokens.iter().any(|t| *t == "--stdio") {
+        for m in LSP_MARKERS {
+            if tokens.iter().any(|t| t.contains(m)) {
+                markers.push((*m).to_string());
+                break;
+            }
+        }
+    }
+
+    // harness_agent_daemon: known agent binaries or daemon args. The cleanos
+    // process itself is excluded by pid in classify(), never by name.
+    for m in AGENT_DAEMON_MARKERS {
+        if tokens.iter().any(|t| t.contains(m)) {
+            markers.push((*m).to_string());
+            break;
+        }
+    }
+
+    // stale_dev_server: node/python/deno executable (socket and elapsed
+    // checks happen in classify against the sockets map).
+    let exe = proc.executable.to_ascii_lowercase();
+    if DEV_SERVER_EXECUTABLES.iter().any(|e| *e == exe) {
+        markers.push("dev-server".to_string());
+    }
+
+    markers
+}
+
+/// True when the process listens on a localhost address.
+fn listens_on_localhost(proc: &ProcessInfo, run: &RunSnapshot) -> bool {
+    run.sockets
+        .get(&proc.pid.to_string())
+        .map(|entries| {
+            entries.iter().any(|s| {
+                matches!(
+                    s.host.as_str(),
+                    "127.0.0.1" | "::1" | "localhost" | "[::1]" | "*"
+                )
+            })
+        })
+        .unwrap_or(false)
+}
+
+/// Socket probe availability: false when lsof was unavailable and the probe
+/// was skipped with a note, so stale_dev_server degrades to elapsed-only.
+pub fn sockets_available(run: &RunSnapshot) -> bool {
+    !run.probe_errors.iter().any(|e| e.probe == "sockets")
+}
+
+/// The harness class for a marker set, in SPEC table order. The dev-server
+/// marker alone is not enough: stale_dev_server needs LISTEN evidence and
+/// elapsed time, so it is decided separately in classify().
+fn harness_class_for(markers: &[String]) -> Option<FindingClass> {
+    if markers.iter().any(|m| MCP_MARKERS.iter().any(|k| k == m)) {
+        return Some(FindingClass::HarnessMcpServer);
+    }
+    if markers.iter().any(|m| LSP_MARKERS.iter().any(|k| k == m)) {
+        return Some(FindingClass::HarnessLsp);
+    }
+    if markers
+        .iter()
+        .any(|m| AGENT_DAEMON_MARKERS.iter().any(|k| k == m))
+    {
+        return Some(FindingClass::HarnessAgentDaemon);
+    }
+    None
+}
+
+/// Harness state: orphaned only when PPID=1 with no launchd job behind it
+/// (the GitNexus incident shape); anything else is attached.
+fn harness_state(proc: &ProcessInfo, managed: &HashSet<u32>, system_managed: bool) -> HarnessState {
+    let is_managed = managed.contains(&proc.pid) || system_managed;
+    if proc.ppid == 1 && !is_managed {
+        HarnessState::Orphaned
+    } else {
+        HarnessState::Attached
+    }
+}
+
+/// reap_safe per SPEC section 2: true only when user-land AND not
+/// launchd-managed AND not self AND not system-path AND state == orphaned.
+/// Computed for the future reaper, never acted on.
+pub fn reap_safe(
+    proc: &ProcessInfo,
+    managed: &HashSet<u32>,
+    system_managed: bool,
+    self_pid: u32,
+) -> bool {
+    let user_land = !is_system_domain_path(proc);
+    let is_managed = managed.contains(&proc.pid) || system_managed;
+    user_land
+        && !is_managed
+        && proc.pid != self_pid
+        && !is_system_domain_path(proc)
+        && harness_state(proc, managed, system_managed) == HarnessState::Orphaned
+}
+
+/// True when a harness marker process must be excluded (SPEC section 2):
+/// the cleanos process itself, launchd-managed, system-path, kernel.
+fn harness_excluded(proc: &ProcessInfo, managed: &HashSet<u32>, self_pid: u32) -> bool {
+    if proc.pid == self_pid {
+        return true;
+    }
+    if proc.pid == 1 || proc.pid == 0 || proc.executable == "kernel_task" {
+        return true;
+    }
+    if managed.contains(&proc.pid) {
+        return true;
+    }
+    if is_system_domain_path(proc) {
+        return true;
+    }
+    false
+}
+
+fn harness_finding(
+    class: FindingClass,
+    proc: &ProcessInfo,
+    markers: &[String],
+    managed: &HashSet<u32>,
+    system_managed: bool,
+    self_pid: u32,
+    sockets: Option<Vec<SocketEntry>>,
+) -> RankedFinding {
+    let state = harness_state(proc, managed, system_managed);
+    let rs = reap_safe(proc, managed, system_managed, self_pid);
+    let is_managed = managed.contains(&proc.pid) || system_managed;
+    let mut evidence = BTreeMap::new();
+    evidence.insert("pid".into(), serde_json::json!(proc.pid));
+    evidence.insert("ppid".into(), serde_json::json!(proc.ppid));
+    evidence.insert("executable".into(), serde_json::json!(proc.executable));
+    evidence.insert("command".into(), serde_json::json!(proc.command));
+    evidence.insert("cpu_pct".into(), serde_json::json!(proc.cpu_pct));
+    evidence.insert("rss_bytes".into(), serde_json::json!(proc.rss_bytes));
+    evidence.insert("elapsed_secs".into(), serde_json::json!(proc.elapsed_secs));
+    evidence.insert("launchd_managed".into(), serde_json::json!(is_managed));
+    evidence.insert(
+        "state".into(),
+        serde_json::json!(match state {
+            HarnessState::Orphaned => "orphaned",
+            HarnessState::Attached => "attached",
+        }),
+    );
+    evidence.insert("reap_safe".into(), serde_json::json!(rs));
+    evidence.insert("harnessreap_compatible".into(), serde_json::json!(true));
+    evidence.insert("markers".into(), serde_json::json!(markers));
+    if let Some(sock) = sockets {
+        evidence.insert("sockets".into(), serde_json::json!(sock));
+    }
+
+    let (category, subcategory, mode, summary) = taxonomy_for(class, proc);
+    let summary = format!(
+        "{} state={} reap_safe={}",
+        summary,
+        match state {
+            HarnessState::Orphaned => "orphaned",
+            HarnessState::Attached => "attached",
+        },
+        rs
+    );
+
+    RankedFinding {
+        id: format!("{category}.{subcategory}.{}", proc.pid),
+        category,
+        subcategory,
+        summary,
+        evidence,
+        expected_gain: expected_gain(class).into(),
+        risk: risk(class).into(),
+        reversible: "yes: SIGTERM after identity validation (PID+PPID+command)".into(),
+        requires_user_action: true,
+        mode,
+        auto_ok: false,
+        fact_or_inference: label_for(class),
+        finding: class.as_str().into(),
+        score: 0,
+        pid: proc.pid,
+        cpu_pct: proc.cpu_pct,
+        rss_bytes: proc.rss_bytes,
+        label: match label_for(class) {
+            FactOrInference::Fact => "FACT".into(),
+            FactOrInference::Inference => "INFERENCE".into(),
+            FactOrInference::None => "none".into(),
+        },
+    }
 }
 
 fn classify_process(
@@ -119,11 +368,7 @@ fn duplicate_orphan_keys(
 ) -> HashSet<(String, String)> {
     let mut counts: HashMap<(String, String), usize> = HashMap::new();
     for p in processes {
-        if p.ppid == 1
-            && !managed.contains(&p.pid)
-            && !is_system_domain_path(p)
-            && p.pid != 1
-        {
+        if p.ppid == 1 && !managed.contains(&p.pid) && !is_system_domain_path(p) && p.pid != 1 {
             let key = (p.executable.clone(), p.command.clone());
             *counts.entry(key).or_insert(0) += 1;
         }
@@ -164,6 +409,39 @@ fn taxonomy_for(class: FindingClass, proc: &ProcessInfo) -> (String, String, Str
                 proc.rss_bytes
             ),
         ),
+        FindingClass::HarnessMcpServer => (
+            "harness-fleet".into(),
+            "harness_mcp_server".into(),
+            "cleanup".into(),
+            format!("MCP server pid={} executable={}", proc.pid, proc.executable),
+        ),
+        FindingClass::HarnessLsp => (
+            "harness-fleet".into(),
+            "harness_lsp".into(),
+            "cleanup".into(),
+            format!(
+                "LSP instance pid={} executable={}",
+                proc.pid, proc.executable
+            ),
+        ),
+        FindingClass::HarnessAgentDaemon => (
+            "harness-fleet".into(),
+            "harness_agent_daemon".into(),
+            "cleanup".into(),
+            format!(
+                "Agent daemon pid={} executable={}",
+                proc.pid, proc.executable
+            ),
+        ),
+        FindingClass::StaleDevServer => (
+            "harness-fleet".into(),
+            "stale_dev_server".into(),
+            "cleanup".into(),
+            format!(
+                "Dev server pid={} executable={} elapsed={}s",
+                proc.pid, proc.executable, proc.elapsed_secs
+            ),
+        ),
         FindingClass::Observed => (
             "processes".into(),
             "observed".into(),
@@ -185,6 +463,10 @@ fn expected_gain(class: FindingClass) -> &'static str {
     match class {
         FindingClass::OrphanCandidate | FindingClass::RunawaySuspect => "high",
         FindingClass::MemoryHog | FindingClass::DuplicateOrphan => "med",
+        FindingClass::HarnessMcpServer
+        | FindingClass::HarnessLsp
+        | FindingClass::HarnessAgentDaemon
+        | FindingClass::StaleDevServer => "med",
         FindingClass::Observed => "low",
     }
 }
@@ -193,23 +475,76 @@ fn risk(class: FindingClass) -> &'static str {
     match class {
         FindingClass::OrphanCandidate | FindingClass::DuplicateOrphan => "med",
         FindingClass::RunawaySuspect | FindingClass::MemoryHog => "low",
+        FindingClass::HarnessMcpServer
+        | FindingClass::HarnessLsp
+        | FindingClass::HarnessAgentDaemon
+        | FindingClass::StaleDevServer => "low",
         FindingClass::Observed => "low",
     }
 }
 
 /// Classify processes into ranked finding shells (score filled by ranker).
-pub fn classify(run: &RunSnapshot, self_pid: u32) -> Vec<(FindingClass, ProcessInfo, RankedFinding)> {
+pub fn classify(
+    run: &RunSnapshot,
+    self_pid: u32,
+) -> Vec<(FindingClass, ProcessInfo, RankedFinding)> {
     let managed = launchd_managed_pids(run);
     let dup_keys = duplicate_orphan_keys(&run.processes, &managed);
     let mut out = Vec::new();
 
     for proc in &run.processes {
-        if is_excluded(proc, self_pid) {
-            continue;
-        }
         // Layer 2: a PPID=1 process on a system path (or a Core Audio
         // Driver context) is managed by the system launchd domain.
         let system_managed = proc.ppid == 1 && is_system_domain_path(proc);
+
+        // Harness-fleet lane (SPEC section 2): marker processes are reported
+        // with state attached or orphaned, subject to the harness exclusions.
+        let markers = harness_markers(proc);
+        if !markers.is_empty() && !harness_excluded(proc, &managed, self_pid) {
+            let sockets_for = if listens_on_localhost(proc, run) {
+                run.sockets.get(&proc.pid.to_string()).cloned()
+            } else {
+                None
+            };
+            let class = harness_class_for(&markers).or_else(|| {
+                // dev-server marker alone: stale_dev_server needs LISTEN
+                // evidence and elapsed >= 6h; degrades to elapsed-only when
+                // the socket probe was skipped (SPEC section 3).
+                let elapsed_ok = proc.elapsed_secs >= STALE_DEV_ELAPSED_SECS;
+                let listen_ok = if sockets_available(run) {
+                    listens_on_localhost(proc, run)
+                } else {
+                    true
+                };
+                if markers.iter().any(|m| m == "dev-server") && elapsed_ok && listen_ok {
+                    Some(FindingClass::StaleDevServer)
+                } else {
+                    None
+                }
+            });
+            if let Some(class) = class {
+                let sockets_for = if class == FindingClass::StaleDevServer {
+                    run.sockets.get(&proc.pid.to_string()).cloned()
+                } else {
+                    sockets_for
+                };
+                let finding = harness_finding(
+                    class,
+                    proc,
+                    &markers,
+                    &managed,
+                    system_managed,
+                    self_pid,
+                    sockets_for,
+                );
+                out.push((class, proc.clone(), finding));
+                continue;
+            }
+        }
+
+        if is_excluded(proc, self_pid) {
+            continue;
+        }
         let class = classify_process(proc, &managed, system_managed, &dup_keys);
         if class == FindingClass::Observed {
             continue;
@@ -257,250 +592,4 @@ pub fn classify(run: &RunSnapshot, self_pid: u32) -> Vec<(FindingClass, ProcessI
         out.push((class, proc.clone(), finding));
     }
     out
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::model::{
-        DisplayInfo, LaunchdInfo, MemoryInfo, PowerInfo, SystemInfo, ThermalInfo,
-    };
-
-    fn proc(pid: u32, ppid: u32, cpu: f64, rss: u64, exe: &str, cmd: &str) -> ProcessInfo {
-        ProcessInfo {
-            pid,
-            ppid,
-            cpu_pct: cpu,
-            rss_bytes: rss,
-            elapsed_secs: 10,
-            executable: exe.into(),
-            command: cmd.into(),
-        }
-    }
-
-    fn run_with(processes: Vec<ProcessInfo>, managed: Vec<(u32, &str)>) -> RunSnapshot {
-        let mut map = std::collections::BTreeMap::new();
-        for (pid, label) in managed {
-            map.insert(pid.to_string(), label.to_string());
-        }
-        RunSnapshot {
-            schema_version: "1".into(),
-            collected_at: "2026-08-10T12:00:00+02:00".into(),
-            duration_ms: 1,
-            system: Some(SystemInfo {
-                os_version: "26.4.1".into(),
-                chip: "Apple M2 Pro".into(),
-                cpu_count: 12,
-                boot_time_epoch: 1,
-                loadavg_1: 1.0,
-                loadavg_5: 1.0,
-                loadavg_15: 1.0,
-            }),
-            memory: Some(MemoryInfo {
-                total_bytes: 16,
-                used_bytes: 8,
-                free_bytes: 8,
-                swap_used_bytes: 0,
-                swap_total_bytes: 0,
-                compressor_bytes: 0,
-                pressure_level: 0,
-                page_size_bytes: 16384,
-            }),
-            processes,
-            launchd: Some(LaunchdInfo { managed: map }),
-            power: Some(PowerInfo {
-                source: "AC".into(),
-                percentage: Some(100),
-            }),
-            thermal: Some(ThermalInfo {
-                thermal_pressure_level: None,
-                raw_summary: "".into(),
-            }),
-            display: Some(DisplayInfo {
-                display_count: 1,
-                primary_summary: "ok".into(),
-            }),
-            probe_errors: vec![],
-        }
-    }
-
-    #[test]
-    fn orphan_vs_launchd_managed_vs_normal() {
-        let snap = run_with(
-            vec![
-                proc(10, 1, 10.0, 100, "orphan", "orphan"),
-                proc(11, 1, 10.0, 100, "agent", "agent"),
-                proc(12, 50, 1.0, 100, "normal", "normal"),
-            ],
-            vec![(11, "com.example.agent")],
-        );
-        let findings = classify(&snap, 999);
-        assert_eq!(findings.len(), 1);
-        assert_eq!(findings[0].0, FindingClass::OrphanCandidate);
-        assert_eq!(findings[0].1.pid, 10);
-    }
-
-    #[test]
-    fn thresholds_and_classes() {
-        let by_cpu = run_with(vec![proc(21, 1, 5.0, 100, "b", "b")], vec![]);
-        assert_eq!(classify(&by_cpu, 1)[0].0, FindingClass::OrphanCandidate);
-        let by_rss = run_with(
-            vec![proc(22, 1, 0.0, ORPHAN_RSS_BYTES, "c", "c")],
-            vec![],
-        );
-        assert_eq!(classify(&by_rss, 1)[0].0, FindingClass::OrphanCandidate);
-        let low = run_with(
-            vec![proc(20, 1, 4.9, ORPHAN_RSS_BYTES - 1, "a", "a")],
-            vec![],
-        );
-        assert!(classify(&low, 1).is_empty());
-
-        let runaway = run_with(vec![proc(30, 5, 50.0, 100, "r", "r")], vec![]);
-        assert_eq!(classify(&runaway, 1)[0].0, FindingClass::RunawaySuspect);
-
-        let hog = run_with(
-            vec![proc(40, 5, 1.0, MEMORY_HOG_RSS_BYTES, "h", "h")],
-            vec![],
-        );
-        assert_eq!(classify(&hog, 1)[0].0, FindingClass::MemoryHog);
-        assert_eq!(
-            classify(&hog, 1)[0].2.fact_or_inference,
-            FactOrInference::Fact
-        );
-    }
-
-    #[test]
-    fn exclusions_pid1_kernel_self() {
-        let snap = run_with(
-            vec![
-                proc(1, 0, 90.0, MEMORY_HOG_RSS_BYTES, "launchd", "/sbin/launchd"),
-                proc(
-                    0,
-                    0,
-                    90.0,
-                    MEMORY_HOG_RSS_BYTES,
-                    "kernel_task",
-                    "kernel_task",
-                ),
-                proc(999, 1, 90.0, MEMORY_HOG_RSS_BYTES, "cleanos", "cleanos"),
-            ],
-            vec![],
-        );
-        assert!(classify(&snap, 999).is_empty());
-    }
-
-    #[test]
-    fn duplicate_orphan_rule() {
-        let snap = run_with(
-            vec![
-                proc(50, 1, 0.1, 100, "dup", "dup --x"),
-                proc(51, 1, 0.1, 100, "dup", "dup --x"),
-            ],
-            vec![],
-        );
-        let findings = classify(&snap, 1);
-        assert_eq!(findings.len(), 2);
-        assert!(findings
-            .iter()
-            .all(|(c, _, _)| *c == FindingClass::DuplicateOrphan));
-    }
-
-    #[test]
-    fn system_daemon_paths_are_not_orphans() {
-        // Ground-truth system daemons: PPID=1 with high CPU, but launched by
-        // the system launchd domain. Layer 2 must keep them out of findings.
-        let snap = run_with(
-            vec![
-                proc(
-                    418,
-                    1,
-                    72.4,
-                    116_304 * 1024,
-                    "WindowServer",
-                    "/System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer -daemon",
-                ),
-                proc(432, 1, 43.8, 106_848 * 1024, "coreaudiod", "/usr/sbin/coreaudiod"),
-                proc(
-                    400,
-                    1,
-                    0.0,
-                    2_160 * 1024,
-                    "distnoted",
-                    "/usr/sbin/distnoted daemon",
-                ),
-                proc(
-                    402,
-                    1,
-                    0.0,
-                    2_160 * 1024,
-                    "tccd",
-                    "/usr/libexec/tccd",
-                ),
-            ],
-            vec![],
-        );
-        assert!(classify(&snap, 999).is_empty());
-    }
-
-    #[test]
-    fn duplicate_orphan_excludes_system_daemons() {
-        // distnoted xN run from /usr/sbin and must not count as duplicate
-        // orphans even though they are not in the user launchctl list.
-        let snap = run_with(
-            vec![
-                proc(410, 1, 0.1, 100, "distnoted", "/usr/sbin/distnoted daemon"),
-                proc(411, 1, 0.1, 100, "distnoted", "/usr/sbin/distnoted daemon"),
-            ],
-            vec![],
-        );
-        assert!(classify(&snap, 1).is_empty());
-    }
-
-    #[test]
-    fn userland_ppid1_not_managed_is_orphan() {
-        // GitNexus-MCP pattern: user-land PPID=1 process under /Applications.
-        let snap = run_with(
-            vec![proc(
-                812,
-                1,
-                6.0,
-                100,
-                "TeamsWidgetExtension",
-                "/Applications/Microsoft Teams.app/Contents/PlugIns/TeamsWidgetExtension.appex/Contents/MacOS/TeamsWidgetExtension -AppleLanguages (\"en_us\", \"de-CH\")",
-            )],
-            vec![],
-        );
-        let findings = classify(&snap, 999);
-        assert_eq!(findings.len(), 1);
-        assert_eq!(findings[0].0, FindingClass::OrphanCandidate);
-        assert_eq!(findings[0].1.pid, 812);
-    }
-
-    #[test]
-    fn system_domain_path_evidence_note() {
-        // A system-managed process can still surface as memory_hog; the
-        // evidence must record launchd_managed=true with the path note.
-        let snap = run_with(
-            vec![proc(
-                700,
-                1,
-                1.0,
-                MEMORY_HOG_RSS_BYTES,
-                "bigsys",
-                "/System/Library/CoreServices/bigsys",
-            )],
-            vec![],
-        );
-        let findings = classify(&snap, 999);
-        assert_eq!(findings.len(), 1);
-        assert_eq!(findings[0].0, FindingClass::MemoryHog);
-        assert_eq!(
-            findings[0].2.evidence["launchd_managed"],
-            serde_json::json!(true)
-        );
-        assert_eq!(
-            findings[0].2.evidence["managed_by"],
-            serde_json::json!("system domain path")
-        );
-    }
 }

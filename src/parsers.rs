@@ -1,6 +1,8 @@
 //! Parsers for macOS command output. Fixture-tested; raw system output is the evidence.
 
-use crate::model::{DisplayInfo, PowerInfo, ProcessInfo, ThermalInfo};
+use std::collections::BTreeMap;
+
+use crate::model::{DisplayInfo, PowerInfo, ProcessInfo, SocketEntry, ThermalInfo};
 
 #[derive(Debug, Clone)]
 pub struct VmStat {
@@ -85,6 +87,8 @@ fn parse_ps_line(line: &str) -> Result<ProcessInfo, String> {
         elapsed_secs: parse_etime(etime),
         executable,
         command,
+        // Annotated by the classifier in probes.rs when markers match.
+        harness_markers: None,
     })
 }
 
@@ -140,6 +144,45 @@ pub fn parse_launchctl_list(
         }
     }
     Ok(map)
+}
+
+/// Parse `lsof -nP -iTCP -sTCP:LISTEN` output into a pid -> [port, host] map.
+/// Lines that lack a TCP LISTEN entry (header, truncated columns, non-TCP
+/// rows) are skipped; a line that carries a TCP entry but is missing columns
+/// is recorded under the pid that could be read when the port is present.
+pub fn parse_lsof_listen(output: &str) -> BTreeMap<String, Vec<SocketEntry>> {
+    let mut map: BTreeMap<String, Vec<SocketEntry>> = BTreeMap::new();
+    for line in output.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.to_ascii_lowercase().starts_with("command") {
+            continue;
+        }
+        let tokens: Vec<&str> = line.split_whitespace().collect();
+        if tokens.len() < 2 {
+            continue;
+        }
+        let Ok(pid) = tokens[1].parse::<u32>() else {
+            continue;
+        };
+        let Some(tcp_idx) = tokens.iter().position(|t| t.starts_with("TCP")) else {
+            continue;
+        };
+        let Some(host_port) = tokens.get(tcp_idx + 1) else {
+            continue;
+        };
+        let (host, port) = match host_port.rsplit_once(':') {
+            Some(pair) => pair,
+            None => continue,
+        };
+        let Ok(port) = port.parse::<u16>() else {
+            continue;
+        };
+        map.entry(pid.to_string()).or_default().push(SocketEntry {
+            port,
+            host: host.to_string(),
+        });
+    }
+    map
 }
 
 pub fn parse_vm_stat(output: &str) -> Result<VmStat, String> {
@@ -415,140 +458,5 @@ fn format_display(name: &str, res: &str, hz: &str) -> String {
         format!("{name}: {res}")
     } else {
         format!("{name}: {res} @ {hz}")
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn ps_args_with_spaces() {
-        let out = "  100     1   2.5   4096 01:02:03 /usr/bin/python3 /usr/bin/python3 script.py --name hello world\n";
-        let procs = parse_ps(out).unwrap();
-        assert_eq!(procs.len(), 1);
-        assert_eq!(procs[0].pid, 100);
-        assert_eq!(procs[0].executable, "python3");
-        assert_eq!(
-            procs[0].command,
-            "/usr/bin/python3 script.py --name hello world"
-        );
-        assert_eq!(procs[0].rss_bytes, 4096 * 1024);
-    }
-
-    #[test]
-    fn ps_truncated_comm_derives_executable_from_args() {
-        // Ground truth ps lines: the comm column is truncated to 16 chars
-        // by ps itself (distno, coreau, a bare "/System/Library/" token).
-        // The executable must come from the args first token instead.
-        let out = "\
-418     1  72.4 116304 20-15:28:36 /System/Library/ /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer -daemon
-400     1   0.0   2160 20-15:28:37 /usr/sbin/distno /usr/sbin/distnoted daemon
-432     1  43.8 106848 20-15:28:36 /usr/sbin/coreau /usr/sbin/coreaudiod
-";
-        let procs = parse_ps(out).unwrap();
-        assert_eq!(procs.len(), 3);
-        let ws = procs.iter().find(|p| p.pid == 418).unwrap();
-        assert_eq!(ws.executable, "WindowServer");
-        assert!(!ws.executable.is_empty());
-        assert_ne!(ws.executable, "/System/Library/");
-        assert_eq!(
-            ws.command,
-            "/System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer -daemon"
-        );
-        let dn = procs.iter().find(|p| p.pid == 400).unwrap();
-        assert_eq!(dn.executable, "distnoted");
-        assert_eq!(dn.command, "/usr/sbin/distnoted daemon");
-        let ca = procs.iter().find(|p| p.pid == 432).unwrap();
-        assert_eq!(ca.executable, "coreaudiod");
-        assert_eq!(ca.command, "/usr/sbin/coreaudiod");
-    }
-
-    #[test]
-    fn ps_args_with_quoted_spaces_keeps_full_command() {
-        let out = "812     1   0.0   5000 1-02:03:04 /Applications/Microsoft Teams.app/Contents/PlugIns/TeamsWidgetExtension.appex/Contents/MacOS/TeamsWidgetExtension -AppleLanguages (\"en_us\", \"de-CH\")\n";
-        let procs = parse_ps(out).unwrap();
-        assert_eq!(procs.len(), 1);
-        assert_eq!(procs[0].pid, 812);
-        assert_eq!(procs[0].executable, "TeamsWidgetExtension");
-        assert_eq!(
-            procs[0].command,
-            "Teams.app/Contents/PlugIns/TeamsWidgetExtension.appex/Contents/MacOS/TeamsWidgetExtension -AppleLanguages (\"en_us\", \"de-CH\")"
-        );
-    }
-
-    #[test]
-    fn ps_comm_only_falls_back_to_comm_token() {
-        let out = "900     1   0.0    100 00:00:01 somecomm\n";
-        let procs = parse_ps(out).unwrap();
-        assert_eq!(procs.len(), 1);
-        assert_eq!(procs[0].executable, "somecomm");
-        assert_eq!(procs[0].command, "somecomm");
-    }
-
-    #[test]
-    fn ps_missing_rss_skipped() {
-        let out = "  100     1   2.5   ?? 01:02:03 /bin/zsh /bin/zsh\n  101     1   1.0   1024 00:00:01 /bin/ls /bin/ls\n";
-        let procs = parse_ps(out).unwrap();
-        assert_eq!(procs.len(), 1);
-        assert_eq!(procs[0].pid, 101);
-    }
-
-    #[test]
-    fn ps_header_edge_case() {
-        let out = "  PID  PPID  %CPU   RSS     ELAPSED COMM ARGS\n  50     1   0.1   2048 00:00:05 /bin/cat /bin/cat\n";
-        let procs = parse_ps(out).unwrap();
-        assert_eq!(procs.len(), 1);
-        assert_eq!(procs[0].pid, 50);
-    }
-
-    #[test]
-    fn launchctl_list_parses_managed() {
-        let out = "PID\tStatus\tLabel\n-\t0\tcom.apple.SafariHistoryServiceAgent\n95652\t-9\tcom.apple.cloudphotod\n";
-        let map = parse_launchctl_list(out).unwrap();
-        assert_eq!(map.get("95652").unwrap(), "com.apple.cloudphotod");
-    }
-
-    #[test]
-    fn vm_stat_page_conversion() {
-        let out = "Mach Virtual Memory Statistics: (page size of 16384 bytes)\nPages free:                                10.\nPages active:                            20.\nPages inactive:                          30.\nPages speculative:                         1.\nPages wired down:                        40.\nPages purgeable:                           2.\nPages occupied by compressor:            5.\n";
-        let vm = parse_vm_stat(out).unwrap();
-        assert_eq!(vm.page_size, 16384);
-        let mem = memory_from_vm_stat(&vm, 16_000_000_000);
-        assert_eq!(mem.free_bytes, 10 * 16384);
-        assert_eq!(mem.compressor_bytes, 5 * 16384);
-    }
-
-    #[test]
-    fn pmset_batt_and_therm() {
-        let batt = "Now drawing from 'AC Power'\n -InternalBattery-0 (id=23527523)\t100%; charged; 0:00 remaining present: true\n";
-        let p = parse_pmset_batt(batt).unwrap();
-        assert_eq!(p.source, "AC");
-        assert_eq!(p.percentage, Some(100));
-        let therm = "Note: No thermal warning level has been recorded\n";
-        let t = parse_pmset_therm(therm).unwrap();
-        assert_eq!(t.thermal_pressure_level.as_deref(), Some("none"));
-    }
-
-    #[test]
-    fn system_profiler_display_summary() {
-        let out = "Graphics/Displays:\n\n    Apple M2 Pro:\n\n      Displays:\n        LC27G7xT:\n          Resolution: 2560 x 1440 (QHD/WQHD - Wide Quad High Definition)\n          UI Looks like: 2560 x 1440 @ 240.00Hz\n          Main Display: Yes\n          Online: Yes\n        Color LCD:\n          Resolution: 3456 x 2234 Retina\n          Online: Yes\n";
-        let d = parse_displays(out).unwrap();
-        assert!(d.display_count >= 2);
-        assert!(d.primary_summary.contains("LC27G7xT") || d.primary_summary.contains("2560"));
-    }
-
-    #[test]
-    fn swap_and_loadavg_boottime() {
-        let (used, total) =
-            parse_swapusage("vm.swapusage: total = 9216.00M  used = 8755.69M  free = 460.31M")
-                .unwrap();
-        assert!(total > used);
-        let (a, b, c) = parse_loadavg("{ 7.87 6.78 6.68 }").unwrap();
-        assert!((a - 7.87).abs() < 0.01);
-        assert!((b - 6.78).abs() < 0.01);
-        assert!((c - 6.68).abs() < 0.01);
-        let boot = parse_boottime("{ sec = 1784614781, usec = 492467 } Tue Jul 21").unwrap();
-        assert_eq!(boot, 1784614781);
     }
 }

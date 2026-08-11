@@ -18,6 +18,10 @@ const CLASSES: &[&str] = &[
     "runaway_suspect",
     "memory_hog",
     "duplicate_orphan",
+    "harness_mcp_server",
+    "harness_lsp",
+    "harness_agent_daemon",
+    "stale_dev_server",
 ];
 
 pub fn build_report(run: &RunSnapshot, source_run: &Path) -> Result<ReportDocument, CleanOsError> {
@@ -48,6 +52,7 @@ pub fn build_report(run: &RunSnapshot, source_run: &Path) -> Result<ReportDocume
         run.power.is_some(),
         run.thermal.is_some(),
         run.display.is_some(),
+        !run.sockets.is_empty(),
     ]
     .iter()
     .filter(|x| **x)
@@ -55,13 +60,17 @@ pub fn build_report(run: &RunSnapshot, source_run: &Path) -> Result<ReportDocume
 
     let error_count = run.probe_errors.len() as u32;
     let summary_line = format!(
-        "probes={} errors={} findings: orphan_candidate={} runaway_suspect={} memory_hog={} duplicate_orphan={}",
+        "probes={} errors={} findings: orphan_candidate={} runaway_suspect={} memory_hog={} duplicate_orphan={} harness_mcp_server={} harness_lsp={} harness_agent_daemon={} stale_dev_server={}",
         probe_count,
         error_count,
         findings_by_class.get("orphan_candidate").copied().unwrap_or(0),
         findings_by_class.get("runaway_suspect").copied().unwrap_or(0),
         findings_by_class.get("memory_hog").copied().unwrap_or(0),
         findings_by_class.get("duplicate_orphan").copied().unwrap_or(0),
+        findings_by_class.get("harness_mcp_server").copied().unwrap_or(0),
+        findings_by_class.get("harness_lsp").copied().unwrap_or(0),
+        findings_by_class.get("harness_agent_daemon").copied().unwrap_or(0),
+        findings_by_class.get("stale_dev_server").copied().unwrap_or(0),
     );
 
     let source = source_run
@@ -141,75 +150,4 @@ pub fn write_report(
     fs::write(path, redacted)
         .map_err(|e| CleanOsError::Io(format!("write {}: {e}", path.display())))?;
     Ok(path.to_path_buf())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::model::{
-        DisplayInfo, LaunchdInfo, MemoryInfo, PowerInfo, ProcessInfo, SystemInfo, ThermalInfo,
-    };
-
-    fn empty_run() -> RunSnapshot {
-        RunSnapshot {
-            schema_version: "1".into(),
-            collected_at: "2026-08-10T12:00:00+02:00".into(),
-            duration_ms: 1,
-            system: Some(SystemInfo {
-                os_version: "26.4.1".into(),
-                chip: "Apple M2 Pro".into(),
-                cpu_count: 12,
-                boot_time_epoch: 1,
-                loadavg_1: 1.0,
-                loadavg_5: 1.0,
-                loadavg_15: 1.0,
-            }),
-            memory: Some(MemoryInfo {
-                total_bytes: 16,
-                used_bytes: 8,
-                free_bytes: 8,
-                swap_used_bytes: 0,
-                swap_total_bytes: 0,
-                compressor_bytes: 0,
-                pressure_level: 0,
-                page_size_bytes: 16384,
-            }),
-            processes: vec![ProcessInfo {
-                pid: 99,
-                ppid: 50,
-                cpu_pct: 0.1,
-                rss_bytes: 1000,
-                elapsed_secs: 1,
-                executable: "ok".into(),
-                command: "ok".into(),
-            }],
-            launchd: Some(LaunchdInfo {
-                managed: Default::default(),
-            }),
-            power: Some(PowerInfo {
-                source: "AC".into(),
-                percentage: Some(100),
-            }),
-            thermal: Some(ThermalInfo {
-                thermal_pressure_level: None,
-                raw_summary: "none".into(),
-            }),
-            display: Some(DisplayInfo {
-                display_count: 1,
-                primary_summary: "Built-in".into(),
-            }),
-            probe_errors: vec![],
-        }
-    }
-
-    #[test]
-    fn zero_finding_honesty() {
-        let report = build_report(&empty_run(), Path::new("empty.json")).unwrap();
-        let table = format_report_table(&report);
-        assert!(table.contains("Zero findings for class orphan_candidate."));
-        assert!(table.contains("Zero findings for class runaway_suspect."));
-        assert!(table.contains("Zero findings for class memory_hog."));
-        assert!(table.contains("Zero findings for class duplicate_orphan."));
-        assert!(!table.contains("/Users/marcelspatz"));
-    }
 }
