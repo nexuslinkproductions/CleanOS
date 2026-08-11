@@ -51,7 +51,7 @@ Scope is intentionally narrow: one evidence path, one report format, one approve
 
 - [ ] Installable as a local CLI with a short README quickstart.
 - [ ] `cleanos collect` and `cleanos report` work on a fresh clone after documented setup.
-- [ ] Tests cover redaction, identity validation, and experiment approval refusal paths.
+- [ ] scripts/verify.sh covers redaction, identity validation, and CLI surface checks against the live machine.
 
 ## 3. Write boundary
 

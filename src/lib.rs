@@ -2,6 +2,7 @@
 
 pub mod bench;
 pub mod classifier;
+pub mod doctor;
 pub mod error;
 pub mod inventory;
 pub mod model;

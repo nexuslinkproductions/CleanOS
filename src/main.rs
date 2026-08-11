@@ -6,6 +6,7 @@ use std::process::ExitCode;
 use clap::{Args, Parser, Subcommand};
 
 use cleanos::bench;
+use cleanos::doctor;
 use cleanos::error::CleanOsError;
 use cleanos::model::RunSnapshot;
 use cleanos::paths::{report_path_for_run, resolve_run_arg, run_path_for};
@@ -35,6 +36,12 @@ enum Commands {
     },
     /// Run the bounded benchmark suite and store the result as JSON.
     Bench(BenchArgs),
+    /// Diagnostics against the live machine (the verification mechanic).
+    Doctor {
+        /// Include the bench tolerance check (cpu burst vs baseline).
+        #[arg(long)]
+        bench: bool,
+    },
 }
 
 #[derive(Args, Debug)]
@@ -104,7 +111,19 @@ fn run() -> Result<(), CleanOsError> {
                 bench::cmd_compare(reference.as_deref(), json)
             }
         },
+        Commands::Doctor { bench } => cmd_doctor(bench),
     }
+}
+
+fn cmd_doctor(include_bench: bool) -> Result<(), CleanOsError> {
+    let diags = doctor::run(include_bench)?;
+    print!("{}", doctor::format_diagnostics(&diags));
+    if diags.iter().any(|d| !d.ok) {
+        return Err(CleanOsError::ProbeFatal(
+            "diagnostics failed; see the FAIL rows above".to_string(),
+        ));
+    }
+    Ok(())
 }
 
 fn cmd_collect() -> Result<(), CleanOsError> {

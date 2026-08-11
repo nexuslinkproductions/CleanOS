@@ -101,7 +101,7 @@ canonical (cpu_burst median real first). JSON compare output under
 Same redaction module as the scan core applies to all bench output: no raw
 home paths, no UUIDs, no tokens.
 
-## 7. Tests (cargo test, all green required)
+## 7. Verification (scripts/verify.sh, all green required)
 
 - Fixture parsers: `/usr/bin/time -p` output, openssl speed rows (multi and
   single formats), powermetrics sample block (use the format above plus a

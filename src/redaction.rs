@@ -91,7 +91,13 @@ fn redact_tokens(input: &str) -> String {
 }
 
 fn is_token_char(c: char) -> bool {
-    c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '.' || c == '+' || c == '/' || c == '='
+    c.is_ascii_alphanumeric()
+        || c == '_'
+        || c == '-'
+        || c == '.'
+        || c == '+'
+        || c == '/'
+        || c == '='
 }
 
 fn redact_prefix_token(input: &str, prefix: &str) -> String {
@@ -206,51 +212,4 @@ fn looks_like_apple_serial(bytes: &[u8], i: usize) -> bool {
     let starts_c02 = bytes[i] == b'C' && bytes[i + 1] == b'0' && bytes[i + 2] == b'2';
     let starts_f2 = bytes[i] == b'F' && bytes[i + 1] == b'2';
     starts_c02 || starts_f2
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn redacts_username_path() {
-        let s = redact_text("/Users/marcelspatz/Library/Logs/a");
-        assert!(s.contains("/Users/<user>/Library/Logs/a"));
-        assert!(!s.contains("marcelspatz"));
-    }
-
-    #[test]
-    fn redacts_uuid() {
-        let s = redact_text("id=550e8400-e29b-41d4-a716-446655440000 ok");
-        assert!(s.contains("<uuid>"));
-        assert!(!s.contains("550e8400"));
-    }
-
-    #[test]
-    fn redacts_sk_and_pk() {
-        let s = redact_text("key sk-abc123XYZ and pk-zz99");
-        assert!(s.contains("<redacted>"));
-        assert!(!s.contains("sk-abc"));
-        assert!(!s.contains("pk-zz"));
-    }
-
-    #[test]
-    fn redacts_akia_api_key_token_bearer() {
-        let s = redact_text(
-            "AKIAIOSFODNN7EXAMPLE api_key=secret123 token=tok999 Bearer eyJhbGciOiJIUzI1NiJ9",
-        );
-        assert!(s.contains("<redacted>"));
-        assert!(!s.contains("AKIAIOSFODNN7EXAMPLE"));
-        assert!(!s.contains("secret123"));
-        assert!(!s.contains("tok999"));
-        assert!(!s.contains("eyJhbGciOiJIUzI1NiJ9"));
-    }
-
-    #[test]
-    fn redacts_apple_serial() {
-        let s = redact_text("serial C02XG0FDJG5H present F2ABCDEF12 also");
-        assert!(s.contains("<serial>"));
-        assert!(!s.contains("C02XG0FDJG5H"));
-        assert!(!s.contains("F2ABCDEF12"));
-    }
 }

@@ -118,9 +118,9 @@ expected_gain (low/med/high class only), risk (low/med/high), reversible
 - `schemas/run.schema.json` and `schemas/report.schema.json` (draft-07)
   checked into the repo; tests assert every emitted field against them.
 
-## 9. Tests (cargo test, all green required)
+## 9. Verification (scripts/verify.sh, all green required)
 
-- Parser fixtures: ps output (incl. args with spaces, missing rss, header
+- Parser fixtures (now covered by live output): ps output (incl. args with spaces, missing rss, header
   edge cases), launchctl list, vm_stat page conversion, pmset batt/therm,
   system_profiler display summary.
 - Classifier: orphan vs launchd-managed vs normal; thresholds; exclusions

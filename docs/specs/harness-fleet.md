@@ -54,7 +54,7 @@ skipped with a note and `stale_dev_server` findings degrade to elapsed-only
   reap_safe, harnessreap_compatible: true (the block matches the harnessreap
   protocol field set; exact mapping documented in the plan layer later).
 
-## 5. Tests (cargo test, all green required)
+## 5. Verification (scripts/verify.sh, all green required)
 
 - Marker fixtures: each class with positive and negative cases (an MCP
   server line, a pyright --stdio line, a codex daemon line, a node
