@@ -99,4 +99,3 @@ performance-audit/
 
 # Rust
 /target/
-Cargo.lock
